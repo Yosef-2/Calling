@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,28 +8,26 @@ import (
 )
 
 type User struct {
-	Password string `json:"password"`
+	Password string
 }
 
 var (
-	users = make(map[string]User) // Key: phone number
+	users = make(map[string]User)
 	mu    sync.RWMutex
 )
 
 func main() {
-	// Serve index.html
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "index.html")
 	})
 
-	// Sign Up Logic
 	http.HandleFunc("/api/signup", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		pass := r.URL.Query().Get("password")
 
 		mu.Lock()
 		if _, exists := users[phone]; exists {
-			http.Error(w, "User already exists", http.StatusConflict)
+			http.Error(w, "User exists", http.StatusConflict)
 			mu.Unlock()
 			return
 		}
@@ -39,10 +36,8 @@ func main() {
 		fmt.Fprint(w, `{"status": "success"}`)
 	})
 
-	// Call Logic (Simple verification if the person exists)
 	http.HandleFunc("/api/call", func(w http.ResponseWriter, r *http.Request) {
 		target := r.URL.Query().Get("target")
-		
 		mu.RLock()
 		_, exists := users[target]
 		mu.RUnlock()
@@ -55,6 +50,8 @@ func main() {
 	})
 
 	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
+	if port == "" {
+		port = "8080"
+	}
 	http.ListenAndServe(":"+port, nil)
 }
