@@ -2,32 +2,58 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My App</title>
+    <title>Voice App</title>
     <style>
-        body { font-family: system-ui, sans-serif; display: grid; place-items: center; height: 100vh; margin: 0; background: #0f172a; color: white; }
-        .card { padding: 2rem; background: #1e293b; border-radius: 12px; border: 1px solid #334155; text-align: center; }
-        button { padding: 10px 20px; background: #38bdf8; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-        button:hover { background: #0ea5e9; }
+        body { font-family: sans-serif; background: #121212; color: white; display: grid; place-items: center; height: 100vh; margin: 0; }
+        .box { background: #1e1e1e; padding: 2rem; border-radius: 15px; width: 300px; text-align: center; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border-radius: 5px; border: none; }
+        button { width: 100%; padding: 10px; background: #00cc66; border: none; color: white; cursor: pointer; border-radius: 5px; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h1>Go + HTML Stack</h1>
-        <p id="status">Status: Ready</p>
-        <button onclick="checkApi()">Verify Connection</button>
+
+    <div id="auth" class="box">
+        <h2>Create Account</h2>
+        <input type="text" id="phone" placeholder="Phone Number">
+        <input type="password" id="pass" placeholder="Password">
+        <button onclick="signup()">Sign Up</button>
+    </div>
+
+    <div id="dialer" class="box hidden">
+        <h2>Make a Call</h2>
+        <input type="text" id="targetPhone" placeholder="Friend's Number">
+        <button onclick="startCall()" style="background: #007bff;">Call</button>
+        <p id="status"></p>
     </div>
 
     <script>
-        async function checkApi() {
+        async function signup() {
+            const p = document.getElementById('phone').value;
+            const pass = document.getElementById('pass').value;
+            const res = await fetch(`/api/signup?phone=${p}&password=${pass}`);
+            if (res.ok) {
+                document.getElementById('auth').classList.add('hidden');
+                document.getElementById('dialer').classList.remove('hidden');
+            } else {
+                alert("User exists or error!");
+            }
+        }
+
+        async function startCall() {
+            const target = document.getElementById('targetPhone').value;
             const status = document.getElementById('status');
-            status.innerText = "Connecting...";
-            try {
-                const res = await fetch('/api/data');
-                const data = await res.json();
-                status.innerText = data.message;
-            } catch (err) {
-                status.innerText = "Error reaching backend";
+            status.innerText = "Dialing...";
+            
+            const res = await fetch(`/api/call?target=${target}`);
+            const data = await res.json();
+            
+            if (res.ok) {
+                status.innerText = `Connected to ${data.target}`;
+                // In a real app, this is where you'd trigger WebRTC
+                alert("In a full app, audio would start now!");
+            } else {
+                status.innerText = "User not found.";
             }
         }
     </script>
