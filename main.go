@@ -1,19 +1,22 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"sync"
 )
 
-type User struct {
-	Password string
+type Signal struct {
+	From string `json:"from"`
+	Data string `json:"data"` // This will hold the WebRTC handshake
 }
 
 var (
-	users = make(map[string]User)
-	mu    sync.RWMutex
+	users   = make(map[string]string) // phone:password
+	signals = make(map[string]chan Signal) // phone:channel for signals
+	mu      sync.Mutex
 )
 
 func main() {
@@ -23,35 +26,44 @@ func main() {
 
 	http.HandleFunc("/api/signup", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
-		pass := r.URL.Query().Get("password")
-
 		mu.Lock()
-		if _, exists := users[phone]; exists {
-			http.Error(w, "User exists", http.StatusConflict)
-			mu.Unlock()
-			return
-		}
-		users[phone] = User{Password: pass}
+		users[phone] = "verified"
+		signals[phone] = make(chan Signal, 10)
 		mu.Unlock()
 		fmt.Fprint(w, `{"status": "success"}`)
 	})
 
-	http.HandleFunc("/api/call", func(w http.ResponseWriter, r *http.Request) {
-		target := r.URL.Query().Get("target")
-		mu.RLock()
-		_, exists := users[target]
-		mu.RUnlock()
-
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
+	// Send a signal (Offer/Answer) to a specific phone number
+	http.HandleFunc("/api/send-signal", func(w http.ResponseWriter, r *http.Request) {
+		target := r.URL.Query().Get("to")
+		var s Signal
+		json.NewDecoder(r.Body).Decode(&s)
+		
+		mu.Lock()
+		if ch, ok := signals[target]; ok {
+			ch <- s
 		}
-		fmt.Fprintf(w, `{"status": "calling", "target": "%s"}`, target)
+		mu.Unlock()
+	})
+
+	// Listen for incoming signals (long polling)
+	http.HandleFunc("/api/get-signal", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		mu.Lock()
+		ch, ok := signals[phone]
+		mu.Unlock()
+
+		if ok {
+			select {
+			case sig := <-ch:
+				json.NewEncoder(w).Encode(sig)
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+		}
 	})
 
 	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	if port == "" { port = "8080" }
 	http.ListenAndServe(":"+port, nil)
 }
