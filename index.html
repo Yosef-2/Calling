@@ -1,59 +1,104 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Voice App</title>
+    <title>Native Voice Call</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; display: grid; place-items: center; height: 100vh; margin: 0; }
-        .box { background: #1e1e1e; padding: 2rem; border-radius: 15px; width: 300px; text-align: center; }
-        input { width: 90%; padding: 10px; margin: 10px 0; border-radius: 5px; border: none; }
-        button { width: 100%; padding: 10px; background: #00cc66; border: none; color: white; cursor: pointer; border-radius: 5px; }
-        .hidden { display: none; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
+        .box { background: #1e1e1e; padding: 20px; border-radius: 10px; display: inline-block; }
+        input { padding: 10px; margin: 10px; border-radius: 5px; border: none; }
+        button { padding: 10px 20px; cursor: pointer; border-radius: 5px; border: none; background: #2ecc71; color: white; }
     </style>
 </head>
 <body>
-
-    <div id="auth" class="box">
-        <h2>Create Account</h2>
-        <input type="text" id="phone" placeholder="Phone Number">
-        <input type="password" id="pass" placeholder="Password">
-        <button onclick="signup()">Sign Up</button>
+    <div class="box">
+        <h2 id="header">Step 1: Register</h2>
+        <input type="text" id="myPhone" placeholder="Your Phone Number">
+        <button onclick="register()">Register</button>
+        
+        <hr>
+        
+        <h2>Step 2: Call Someone</h2>
+        <input type="text" id="targetPhone" placeholder="Target Phone Number">
+        <button onclick="startCall()" style="background:#3498db">Start Voice Call</button>
+        <p id="status">Status: Idle</p>
     </div>
 
-    <div id="dialer" class="box hidden">
-        <h2>Make a Call</h2>
-        <input type="text" id="targetPhone" placeholder="Friend's Number">
-        <button onclick="startCall()" style="background: #007bff;">Call</button>
-        <p id="status"></p>
-    </div>
+    <audio id="remoteAudio" autoplay></audio>
 
     <script>
-        async function signup() {
-            const p = document.getElementById('phone').value;
-            const pass = document.getElementById('pass').value;
-            const res = await fetch(`/api/signup?phone=${p}&password=${pass}`);
-            if (res.ok) {
-                document.getElementById('auth').classList.add('hidden');
-                document.getElementById('dialer').classList.remove('hidden');
-            } else {
-                alert("User exists or error!");
-            }
+        let myPhone = "";
+        let peerConnection;
+        const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+        async function register() {
+            myPhone = document.getElementById('myPhone').value;
+            await fetch(`/api/signup?phone=${myPhone}`);
+            document.getElementById('header').innerText = "Logged in as " + myPhone;
+            pollSignals();
+        }
+
+        async function setupWebRTC() {
+            peerConnection = new RTCPeerConnection(config);
+            
+            // Get Microphone
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+            // Handle incoming audio
+            peerConnection.ontrack = event => {
+                document.getElementById('remoteAudio').srcObject = event.streams[0];
+            };
+
+            // Handle Network Discovery (ICE)
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    sendSignal(document.getElementById('targetPhone').value, { type: 'candidate', candidate: event.candidate });
+                }
+            };
         }
 
         async function startCall() {
-            const target = document.getElementById('targetPhone').value;
-            const status = document.getElementById('status');
-            status.innerText = "Dialing...";
+            await setupWebRTC();
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
             
-            const res = await fetch(`/api/call?target=${target}`);
-            const data = await res.json();
-            
-            if (res.ok) {
-                status.innerText = `Connected to ${data.target}`;
-                // In a real app, this is where you'd trigger WebRTC
-                alert("In a full app, audio would start now!");
-            } else {
-                status.innerText = "User not found.";
+            sendSignal(document.getElementById('targetPhone').value, { type: 'offer', sdp: offer.sdp });
+            document.getElementById('status').innerText = "Calling...";
+        }
+
+        async function sendSignal(to, data) {
+            await fetch(`/api/send-signal?to=${to}`, {
+                method: 'POST',
+                body: JSON.stringify({ from: myPhone, data: JSON.stringify(data) })
+            });
+        }
+
+        async function pollSignals() {
+            setInterval(async () => {
+                const res = await fetch(`/api/get-signal?phone=${myPhone}`);
+                if (res.status === 200) {
+                    const signal = await res.json();
+                    const data = JSON.parse(signal.data);
+                    handleSignal(signal.from, data);
+                }
+            }, 2000);
+        }
+
+        async function handleSignal(from, data) {
+            if (!peerConnection) await setupWebRTC();
+
+            if (data.type === 'offer') {
+                document.getElementById('targetPhone').value = from;
+                await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.sdp }));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                sendSignal(from, { type: 'answer', sdp: answer.sdp });
+                document.getElementById('status').innerText = "Connected to " + from;
+            } else if (data.type === 'answer') {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+                document.getElementById('status').innerText = "Call Connected";
+            } else if (data.type === 'candidate') {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
             }
         }
     </script>
